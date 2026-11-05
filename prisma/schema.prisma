@@ -1,0 +1,234 @@
+generator client { provider = "prisma-client-js" }
+datasource db { provider = "postgresql"; url = env("DATABASE_URL") }
+
+enum Role { OWNER EDITOR VIEWER }
+enum Status { DRAFT PUBLISHED ARCHIVED }
+enum ImageView { FRONT BACK SIDE CLOSEUP EMBROIDERY FABRIC COLOUR SKETCH FLAT OTHER }
+enum SketchType { HAND_DRAWN DIGITAL CROQUIS TECHNICAL_FLAT CONSTRUCTION EMBROIDERY_DRAWING SURFACE }
+enum MaterialType { FABRIC TEXTILE EMBROIDERY SURFACE_TECHNIQUE CRAFT COLOUR_REFERENCE }
+enum MoodboardKind { INSPIRATION COLOUR FABRIC CULTURAL EMBROIDERY SILHOUETTE STYLING CAMPAIGN LOOKBOOK }
+enum ProposalStatus { PENDING APPROVED REJECTED EXECUTED FAILED ROLLED_BACK }
+
+model User {
+  id String @id @default(cuid())
+  email String @unique
+  name String?
+  passwordHash String
+  role Role @default(EDITOR)
+  createdAt DateTime @default(now())
+  resetTokenHash String?
+  resetExpires DateTime?
+  conversations AiConversation[]
+  audit AuditLog[]
+}
+
+model Media {
+  id String @id @default(cuid())
+  key String @unique          // object key in cloud bucket
+  url String
+  mime String
+  sizeBytes Int
+  width Int?
+  height Int?
+  alt String @default("")
+  caption String @default("")
+  tags String[]
+  createdAt DateTime @default(now())
+  outfitImages OutfitImage[]
+}
+
+model Collection {
+  id String @id @default(cuid())
+  slug String @unique
+  title String
+  coverMediaId String?
+  description String @default("")
+  inspiration String @default("")
+  designConcept String @default("")
+  colourStory Json @default("[]")   // [{name, hex}]
+  fabricDetails String @default("")
+  philosophy String @default("")
+  status Status @default(DRAFT)
+  sortOrder Int @default(0)
+  seoTitle String?
+  seoDescription String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  outfits Outfit[]
+  projects ProjectCollection[]
+}
+
+model Outfit {
+  id String @id @default(cuid())
+  slug String
+  collectionId String
+  collection Collection @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+  title String
+  description String @default("")
+  inspiration String @default("")
+  silhouette String @default("")
+  embroidery String @default("")
+  fabric String @default("")
+  colours Json @default("[]")
+  sketchMediaId String?
+  flatMediaId String?
+  status Status @default(DRAFT)
+  sortOrder Int @default(0)
+  seoTitle String?
+  seoDescription String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  images OutfitImage[]
+  @@unique([collectionId, slug])
+}
+
+model OutfitImage {
+  id String @id @default(cuid())
+  outfitId String
+  outfit Outfit @relation(fields: [outfitId], references: [id], onDelete: Cascade)
+  mediaId String
+  media Media @relation(fields: [mediaId], references: [id])
+  view ImageView @default(OTHER)
+  sortOrder Int @default(0)
+}
+
+model Project {
+  id String @id @default(cuid())
+  slug String @unique
+  name String
+  description String @default("")
+  designConcept String @default("")
+  process String @default("")
+  projectStatus String @default("In progress")
+  status Status @default(DRAFT)
+  coverMediaId String?
+  mediaIds String[]
+  sketchIds String[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  collections ProjectCollection[]
+}
+
+model ProjectCollection {
+  projectId String
+  collectionId String
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  collection Collection @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+  @@id([projectId, collectionId])
+}
+
+model Moodboard {
+  id String @id @default(cuid())
+  slug String @unique
+  title String
+  kind MoodboardKind @default(INSPIRATION)
+  description String @default("")
+  mediaIds String[]
+  colours Json @default("[]")
+  status Status @default(DRAFT)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Sketch {
+  id String @id @default(cuid())
+  title String
+  type SketchType @default(HAND_DRAWN)
+  mediaId String?
+  caption String @default("")
+  outfitId String?
+  status Status @default(DRAFT)
+  sortOrder Int @default(0)
+  createdAt DateTime @default(now())
+}
+
+model Material {
+  id String @id @default(cuid())
+  title String
+  type MaterialType @default(FABRIC)
+  description String @default("")
+  origin String @default("")
+  mediaIds String[]
+  status Status @default(DRAFT)
+  createdAt DateTime @default(now())
+}
+
+model SiteSetting { key String @id; value Json; updatedAt DateTime @updatedAt }   // hero video, bio, socials, SEO
+model ThemeSetting { id String @id @default("active"); draft Json?; published Json; updatedAt DateTime @updatedAt }
+
+model PageLayout {
+  id String @id @default(cuid())
+  page String @unique        // "home", "about", ...
+  draft Json                 // ordered sections: [{id,type,props,hidden}]
+  published Json?
+  history Json @default("[]")  // snapshots for undo/rollback
+  updatedAt DateTime @updatedAt
+}
+
+model Enquiry {
+  id String @id @default(cuid())
+  name String
+  email String
+  message String
+  read Boolean @default(false)
+  createdAt DateTime @default(now())
+}
+
+model AiConversation {
+  id String @id @default(cuid())
+  userId String
+  user User @relation(fields: [userId], references: [id])
+  title String @default("New conversation")
+  createdAt DateTime @default(now())
+  messages AiMessage[]
+  proposals AiProposal[]
+}
+
+model AiMessage {
+  id String @id @default(cuid())
+  conversationId String
+  conversation AiConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  role String      // user | assistant
+  content String
+  attachments String[]
+  createdAt DateTime @default(now())
+}
+
+// Only entries the owner explicitly saves. Conversations are NOT auto-saved here.
+model AiMemory {
+  id String @id @default(cuid())
+  category String   // collection | colour | fabric | silhouette | embroidery | project | philosophy | style
+  title String
+  content String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model AiProposal {
+  id String @id @default(cuid())
+  conversationId String
+  conversation AiConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  actionType String
+  payload Json
+  summary String
+  destructive Boolean @default(false)
+  status ProposalStatus @default(PENDING)
+  before Json?               // snapshot for rollback
+  result Json?
+  decidedById String?
+  decidedAt DateTime?
+  createdAt DateTime @default(now())
+}
+
+model AuditLog {
+  id String @id @default(cuid())
+  userId String?
+  user User? @relation(fields: [userId], references: [id])
+  action String
+  entity String?
+  entityId String?
+  meta Json?
+  source String @default("admin")  // admin | ai
+  createdAt DateTime @default(now())
+  @@index([createdAt])
+}
